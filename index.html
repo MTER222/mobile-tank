@@ -1,0 +1,166 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport"
+content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Tank MP</title>
+<style>
+html,body{margin:0;overflow:hidden;background:#000;touch-action:none}
+#login{
+position:fixed;inset:0;background:#000;z-index:10;
+display:flex;flex-direction:column;align-items:center;justify-content:center;
+color:#0f0;font-size:22px
+}
+input,button{font-size:22px;padding:10px;margin:10px}
+#ui{position:fixed;inset:0;pointer-events:none}
+.joy{position:absolute;width:140px;height:140px;border-radius:50%;
+border:2px solid #777}
+#l{left:20px;bottom:20px}
+#r{right:20px;bottom:20px}
+.k{width:60px;height:60px;border-radius:50%;background:#aaa;
+position:absolute;left:40px;top:40px}
+#fire{
+position:absolute;right:180px;bottom:40px;
+width:120px;height:120px;border-radius:50%;
+background:#a00;color:#0f0;
+display:flex;align-items:center;justify-content:center;
+font-size:24px;pointer-events:auto
+}
+#hud{position:absolute;top:10px;left:10px;color:#0f0}
+</style>
+</head>
+<body>
+
+<div id="login">
+<div>Введите ник</div>
+<input id="nick">
+<button id="play">PLAY</button>
+</div>
+
+<div id="ui">
+<div id="l" class="joy"><div class="k"></div></div>
+<div id="r" class="joy"><div class="k"></div></div>
+<div id="fire">FIRE</div>
+<div id="hud">HP: <span id="hp">100</span></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<script>
+let nick = localStorage.getItem('nick');
+const login = document.getElementById('login');
+if (nick) login.style.display='none';
+play.onclick=()=>{
+  nick=nick.value.trim();
+  if(!nick)return;
+  localStorage.setItem('nick',nick);
+  login.style.display='none';
+};
+
+const ws = new WebSocket(
+(location.protocol==='https:'?'wss':'ws')+'://'+location.host
+);
+
+let myId=null,state={p:[],b:[]};
+ws.onmessage=e=>{
+  const m=JSON.parse(e.data);
+  if(m.t==='init')myId=m.id;
+  if(m.t==='state')state=m;
+};
+
+const scene=new THREE.Scene();
+const cam=new THREE.OrthographicCamera(-10,10,10,-10,0.1,50);
+cam.position.set(0,20,0); cam.lookAt(0,0,0);
+
+const r=new THREE.WebGLRenderer();
+r.setSize(innerWidth,innerHeight);
+document.body.appendChild(r.domElement);
+
+window.onresize=()=>r.setSize(innerWidth,innerHeight);
+
+scene.add(new THREE.AmbientLight(0xffffff));
+
+const tanks={};
+
+function label(txt){
+  const c=document.createElement('canvas');
+  c.width=256;c.height=64;
+  const x=c.getContext('2d');
+  x.fillStyle='#0f0';
+  x.font='24px sans-serif';
+  x.textAlign='center';
+  x.fillText(txt,128,40);
+  const t=new THREE.CanvasTexture(c);
+  const s=new THREE.Sprite(new THREE.SpriteMaterial({map:t}));
+  s.scale.set(4,1,1); s.position.y=1.5;
+  return s;
+}
+
+function tank(color,name){
+  const g=new THREE.Group();
+  const body=new THREE.Mesh(
+    new THREE.BoxGeometry(1,0.6,1.4),
+    new THREE.MeshBasicMaterial({color})
+  );
+  body.position.y=0.3;
+  const turret=new THREE.Mesh(
+    new THREE.CylinderGeometry(0.2,0.2,0.8),
+    new THREE.MeshBasicMaterial({color:0x333})
+  );
+  turret.rotation.z=Math.PI/2;
+  turret.position.y=0.6;
+  g.add(body,turret,label(name));
+  scene.add(g);
+  return g;
+}
+
+const input={f:0,r:0,fire:0};
+
+function joy(id,cb){
+  const j=document.getElementById(id);
+  const k=j.children[0];
+  let pid=null;
+  j.onpointerdown=e=>{pid=e.pointerId;j.setPointerCapture(pid)};
+  j.onpointermove=e=>{
+    if(e.pointerId!==pid)return;
+    const r=j.getBoundingClientRect();
+    let x=e.clientX-(r.left+r.width/2);
+    let y=e.clientY-(r.top+r.height/2);
+    x=Math.max(-50,Math.min(50,x));
+    y=Math.max(-50,Math.min(50,y));
+    k.style.transform=`translate(${x}px,${y}px)`;
+    cb(x/50,y/50);
+  };
+  j.onpointerup=()=>{pid=null;k.style.transform='';cb(0,0)};
+}
+
+joy('l',(x,y)=>input.f=-y);
+joy('r',(x,y)=>input.r=x);
+fire.onpointerdown=()=>input.fire=1;
+
+setInterval(()=>{
+  if(ws.readyState===1)
+    ws.send(JSON.stringify({t:'input',n:nick,i:input}));
+  input.fire=0;
+},50);
+
+function loop(){
+  requestAnimationFrame(loop);
+  for(const p of state.p){
+    if(!tanks[p.id])
+      tanks[p.id]=tank(p.id===myId?0x00ff00:0xff0000,p.n);
+    const t=tanks[p.id];
+    t.position.set(p.x,0,p.z);
+    t.rotation.y=p.r;
+    if(p.id===myId){
+      cam.position.x=p.x;
+      cam.position.z=p.z;
+      hp.textContent=p.h;
+    }
+  }
+  r.render(scene,cam);
+}
+loop();
+</script>
+</body>
+</html>
